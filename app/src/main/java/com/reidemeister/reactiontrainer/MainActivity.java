@@ -1,6 +1,18 @@
+/**
+ * @file MainActivity.java
+ * @brief Main UI Handlers.
+ * @version 1.0
+ * @author Thomas Reidemeister <treideme@gmail.com>
+ * @copyright 2023 Thomas Reidemeister
+ * @license Apache-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package com.reidemeister.reactiontrainer;
 
 import android.Manifest;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGattCharacteristic;
 import android.content.pm.PackageManager;
 import android.util.Log;
 import android.widget.Button;
@@ -9,19 +21,37 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import androidx.core.app.ActivityCompat;
+import com.reidemeister.reactiontrainer.Pod;
 
 
-public class MainActivity extends AppCompatActivity {
-    private static PodsManager podsManager = null;
+public class MainActivity extends AppCompatActivity implements Pod.Callback {
+    private Pod pod;
+    private boolean hasPermission = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        if(podsManager == null) {
-            podsManager = new PodsManager(this, getApplicationContext());
-        }
+        Log.d("ReactionTrainerLog", "onCreate");
+//        if(podsManager == null) {
+//            podsManager = new PodsManager(this, getApplicationContext());
+//        }
+        pod = new Pod(getApplicationContext());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         requestPermissions();
+    }
+
+    protected void onResume() {
+        super.onResume();
+        Log.d("ReactionTrainerLog", "onResume");
+        if(hasPermission) {
+            pod.registerCallback(this);
+            pod.connectFirstAvailable();
+        }
+    }
+
+    private void onHasPermission() {
+        Log.d("ReactionTrainerLog", "onHasPermission");
+        hasPermission = true;
     }
 
     /**
@@ -50,9 +80,9 @@ public class MainActivity extends AppCompatActivity {
                 requested_permission = true;
             }
         }
-        Log.d("ReactionTrainer", "After Permissions before finding Pods " + requested_permission);
+        Log.d("ReactionTrainerLog", "After Permissions before finding Pods " + requested_permission);
         if (!requested_permission) {
-            podsManager.onHasPermission();
+            onHasPermission();
         } else {
             changeStatus("Insufficient Permissions");
         }
@@ -70,7 +100,7 @@ public class MainActivity extends AppCompatActivity {
         if(permissionDenied) {
             changeStatus("Insufficient Permissions");
         } else {
-            podsManager.onHasPermission();
+            onHasPermission();
         }
     }
 
@@ -94,14 +124,45 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onStart() {
-        super.onStart();
-        podsManager.onStart();
+    protected void onStop() {
+        super.onStop();
+        Log.d("ReactionTrainerLog", "onStop");
+        if(hasPermission) {
+            pod.unregisterCallback(this);
+            pod.disconnect();
+        }
+    }
+
+    // Pod callback handlers
+
+    @Override
+    public void onConnected(Pod uart) {
+        Log.d("ReactionTrainerLog", "Connected to Pod");
+        uart.send("Hello World!\n");
     }
 
     @Override
-    protected void onStop() {
-        super.onStop();
-        podsManager.onStop();
+    public void onConnectFailed(Pod uart) {
+        Log.d("ReactionTrainerLog", "Failed to connect to Pod");
+    }
+
+    @Override
+    public void onDisconnected(Pod uart) {
+        Log.d("ReactionTrainerLog", "Disconnected from Pod");
+    }
+
+    @Override
+    public void onReceive(Pod uart, BluetoothGattCharacteristic rx) {
+        Log.d("ReactionTrainerLog", "Received data from Pod");
+    }
+
+    @Override
+    public void onDeviceFound(BluetoothDevice device) {
+        Log.d("ReactionTrainerLog", "Found Pod");
+    }
+
+    @Override
+    public void onDeviceInfoAvailable() {
+        Log.d("ReactionTrainerLog", "Pod info available");
     }
 }
