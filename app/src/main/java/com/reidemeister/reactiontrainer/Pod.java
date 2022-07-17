@@ -11,7 +11,6 @@
 package com.reidemeister.reactiontrainer;
 
 import android.annotation.SuppressLint;
-import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
@@ -20,17 +19,16 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.content.Context;
 import android.util.Log;
 
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Queue;
 import java.util.UUID;
 import java.util.WeakHashMap;
-import java.lang.String;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Pod management interface. This class provides methods for connecting to a BLE Peripheral.
  */
-public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeScanCallback {
+public class Pod extends BluetoothGattCallback {
     // UUIDs for UART service and associated characteristics.
     public static UUID UART_UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9f");
     public static UUID RX_UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9f");
@@ -45,13 +43,10 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
     public static UUID CLIENT_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
     // Internal UART state.
-    private final Context context;
     private final WeakHashMap<Callback, Object> callbacks;
-    private final BluetoothAdapter adapter;
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic tx;
     private BluetoothGattCharacteristic rx;
-    private boolean connectFirst;
     private volatile boolean writeInProgress; // Flag to indicate a write is currently in progress
 
     // Device Information state.
@@ -67,20 +62,17 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
 
     // Interface for a BluetoothLeUart client to be notified of UART actions.
     public interface Callback {
-        void onConnected(Pod uart);
-        void onConnectFailed(Pod uart);
-        void onDisconnected(Pod uart);
-        void onReceive(Pod uart, BluetoothGattCharacteristic rx);
-        void onDeviceFound(BluetoothDevice device);
-        void onDeviceInfoAvailable();
+        void onConnected(Pod pod);
+        void onConnectFailed(Pod pod);
+        void onDisconnected(Pod pod);
+        void onReceive(Pod pod, BluetoothGattCharacteristic rx);
+        void onDeviceInfoAvailable(Pod pod);
     }
 
-    public Pod(Context context) {
+    @SuppressLint("MissingPermission")
+    public Pod(Context context, BluetoothDevice device) {
         super();
-        this.context = context;
         this.callbacks = new WeakHashMap<>();
-        this.adapter = BluetoothAdapter.getDefaultAdapter();
-        this.gatt = null;
         this.tx = null;
         this.rx = null;
         this.descriptorManufacturer = null;
@@ -88,15 +80,10 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
         this.descriptorHardwareRevision = null;
         this.descriptorSoftwareRevision = null;
         this.disAvailable = false;
-        this.connectFirst = false;
         this.writeInProgress = false;
         this.readQueue = new ConcurrentLinkedQueue<>();
         this.sendQueue = new ConcurrentLinkedQueue<>();
-    }
-
-    // Return instance of BluetoothGatt.
-    public BluetoothGatt getGatt() {
-        return gatt;
+        gatt = device.connectGatt(context, true, this);
     }
 
     // Return true if connected to UART device, false otherwise.
@@ -109,11 +96,9 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
             // Do nothing if there is no connection.
             return "";
         }
-        StringBuilder sb = new StringBuilder();
-        sb.append("Manufacturer : " + descriptorManufacturer.getStringValue(0) + "\n");
-        sb.append("Model        : " + descriptorModel.getStringValue(0) + "\n");
-        sb.append("Firmware     : " + descriptorSoftwareRevision.getStringValue(0) + "\n");
-        return sb.toString();
+        return "Manufacturer : " + descriptorManufacturer.getStringValue(0) + "\n" +
+                "Model        : " + descriptorModel.getStringValue(0) + "\n" +
+                "Firmware     : " + descriptorSoftwareRevision.getStringValue(0) + "\n";
     }
 
     public boolean deviceInfoAvailable() { return disAvailable; }
@@ -128,7 +113,7 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
                 if(value != null) {
                     tx.setValue(value);
                     if (!gatt.writeCharacteristic(tx)) {
-                        Log.d("ReactionTrainerLog", "send failed for "+new String(value, Charset.forName("UTF-8")));
+                        Log.d("ReactionTrainerLog", "send failed for "+new String(value, StandardCharsets.UTF_8));
                         writeInProgress = false;
                         return false;
                     }
@@ -156,7 +141,7 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
     // Send data to connected UART device.
     public void send(String data) {
         if (data != null && !data.isEmpty()) {
-            send(data.getBytes(Charset.forName("UTF-8")));
+            send(data.getBytes(StandardCharsets.UTF_8));
         }
     }
 
@@ -181,35 +166,6 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
         gatt = null;
         tx = null;
         rx = null;
-    }
-
-    // Stop any in progress UART device scan.
-    @SuppressLint("MissingPermission")
-    public void stopScan() {
-        if (adapter != null) {
-            adapter.stopLeScan(this);
-        }
-    }
-
-    // Start scanning for BLE UART devices.  Registered callback's onDeviceFound method will be called
-    // when devices are found during scanning.
-    @SuppressLint("MissingPermission")
-    public void startScan() {
-        if (adapter != null) {
-            Log.d("ReactionTrainerLog", "startScan");
-            adapter.startLeScan(this);
-        }
-    }
-
-    // Connect to the first available UART device.
-    public void connectFirstAvailable() {
-        // Disconnect to any connected device.
-        disconnect();
-        // Stop any in progress device scan.
-        stopScan();
-        // Start scan and connect to first available device.
-        connectFirst = true;
-        startScan();
     }
 
     // Handlers for BluetoothGatt and LeScan events.
@@ -308,7 +264,6 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
         super.onCharacteristicRead(gatt, characteristic, status);
         Log.d("ReactionTrainerLog", "onCharacteristicRead");
         if (status == BluetoothGatt.GATT_SUCCESS) {
-            //Log.w("DIS", characteristic.getStringValue(0));
             // Check if there is anything left in the queue
             BluetoothGattCharacteristic nextRequest = readQueue.poll();
             if(nextRequest != null){
@@ -336,38 +291,6 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
         }
         writeInProgress = false;
         kickSend();
-    }
-
-    @SuppressLint("MissingPermission")
-    @Override
-    public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
-        final byte [] prefix = { // see advertData in ble_vcp.c
-                0x02, // length of this data
-                0x01, // GAP_ADTYPE_FLAGS,
-                0x06, // DEFAULT_DISCOVERABLE_MODE | GAP_ADTYPE_FLAGS_BREDR_NOT_SUPPORTED,
-                0x03, // length of this data
-                0x02, // GAP_ADTYPE_16BIT_MORE
-                (byte) 0xE0, // LO_UINT16(SIMPLEPROFILE_SERV_UUID)
-                (byte) 0xFF}; // HI_UINT16(SIMPLEPROFILE_SERV_UUID)
-
-        Log.d("ReactionTrainerLog", "onLeScan");
-        for(int i = 0; i < prefix.length; i++) {
-            if(scanRecord[i] != prefix[i]) {
-                return;
-            }
-        }
-
-        // Notify registered callbacks of found device.
-        notifyOnDeviceFound(device);
-        // Connect to first found device if required.
-        if (connectFirst) {
-            // Stop scanning for devices.
-            stopScan();
-            // Prevent connections to future found devices.
-            connectFirst = false;
-            // Connect to device.
-            gatt = device.connectGatt(context, true, this);
-        }
     }
 
     @SuppressLint("MissingPermission")
@@ -432,18 +355,10 @@ public class Pod extends BluetoothGattCallback implements BluetoothAdapter.LeSca
         }
     }
 
-    private void notifyOnDeviceFound(BluetoothDevice device) {
-        for (Callback cb : callbacks.keySet()) {
-            if (cb != null) {
-                cb.onDeviceFound(device);
-            }
-        }
-    }
-
     private void notifyOnDeviceInfoAvailable() {
         for (Callback cb : callbacks.keySet()) {
             if (cb != null) {
-                cb.onDeviceInfoAvailable();
+                cb.onDeviceInfoAvailable(this);
             }
         }
     }
