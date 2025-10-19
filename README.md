@@ -29,7 +29,7 @@ the button will change to a bright green from gray.
  * IntelliJ Idea 2023.1.4
  * Samsung Galaxy S20+
 
-See [my blog post](https://www.reidemeister.com/?p=624) for more information and build updates.
+See [my blog post](https://reidemeister.com/blog/2023.04.30) for more information and build updates.
 
  * [Firmware Sources and Overview](https://github.com/treideme/reaction-trainer)
  * [Hardware Designs](https://github.com/treideme/reaction-trainer-hw)
